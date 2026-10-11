@@ -1,12 +1,12 @@
-
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from app.auth import get_current_user
 
 router = APIRouter(prefix="/api/devices", tags=["Devices"])
 
@@ -75,46 +75,53 @@ def serialize_device(row):
     return device
 
 
-def find_device(connection, device_id: int):
+def find_device(connection, device_id: int, owner_id: int):
     row = connection.execute(
-        "SELECT * FROM devices WHERE id = ?",
-        (device_id,),
+        """
+        SELECT d.* FROM devices d
+        JOIN sites s ON s.id = d.site_id
+        WHERE d.id = ? AND s.owner_id = ?
+        """,
+        (device_id, owner_id),
     ).fetchone()
 
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Device not found",
+            detail="Device not found.",
         )
 
     return row
 
 
-def check_site(connection, site_id: int):
+def check_site(connection, site_id: int, owner_id: int):
     row = connection.execute(
-        "SELECT id FROM sites WHERE id = ?",
-        (site_id,),
+        "SELECT id FROM sites WHERE id = ? AND owner_id = ?",
+        (site_id, owner_id),
     ).fetchone()
 
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Site not found",
+            detail="Site not found.",
         )
 
 
 @router.get("", response_model=list[DeviceResponse])
-def list_devices(site_id: int = Query(gt=0)):
+def list_devices(
+    site_id: int = Query(gt=0),
+    user=Depends(get_current_user),
+):
     with closing(get_connection()) as connection:
-        check_site(connection, site_id)
-
+        check_site(connection, site_id, user["id"])
         rows = connection.execute(
             """
-            SELECT * FROM devices
-            WHERE site_id = ?
-            ORDER BY id ASC
+            SELECT d.* FROM devices d
+            JOIN sites s ON s.id = d.site_id
+            WHERE d.site_id = ? AND s.owner_id = ?
+            ORDER BY d.id ASC
             """,
-            (site_id,),
+            (site_id, user["id"]),
         ).fetchall()
 
         return [serialize_device(row) for row in rows]
@@ -125,25 +132,19 @@ def list_devices(site_id: int = Query(gt=0)):
     response_model=DeviceResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_device(device: DeviceInput):
+def create_device(device: DeviceInput, user=Depends(get_current_user)):
     data = device.model_dump()
-
     data["name"] = data["name"].strip()
     if not data["name"]:
-        raise HTTPException(
-            status_code=422,
-            detail="Device name cannot be blank",
-        )
+        raise HTTPException(status_code=422, detail="Device name cannot be blank.")
 
     with closing(get_connection()) as connection:
         with connection:
-            check_site(connection, data["site_id"])
-
+            check_site(connection, data["site_id"], user["id"])
             cursor = connection.execute(
                 """
                 INSERT INTO devices
-                    (site_id, name, category, power, hours,
-                     flexible, enabled)
+                    (site_id, name, category, power, hours, flexible, enabled)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -156,33 +157,31 @@ def create_device(device: DeviceInput):
                     int(data["enabled"]),
                 ),
             )
-
             return serialize_device(
-                find_device(connection, cursor.lastrowid)
+                find_device(connection, cursor.lastrowid, user["id"])
             )
 
 
 @router.put("/{device_id}", response_model=DeviceResponse)
-def update_device(device_id: int, device: DeviceInput):
+def update_device(
+    device_id: int,
+    device: DeviceInput,
+    user=Depends(get_current_user),
+):
     data = device.model_dump()
     data["name"] = data["name"].strip()
-
     if not data["name"]:
-        raise HTTPException(
-            status_code=422,
-            detail="Device name cannot be blank",
-        )
+        raise HTTPException(status_code=422, detail="Device name cannot be blank.")
 
     with closing(get_connection()) as connection:
         with connection:
-            find_device(connection, device_id)
-            check_site(connection, data["site_id"])
-
+            find_device(connection, device_id, user["id"])
+            check_site(connection, data["site_id"], user["id"])
             connection.execute(
                 """
                 UPDATE devices
-                SET site_id = ?, name = ?, category = ?,
-                    power = ?, hours = ?, flexible = ?, enabled = ?
+                SET site_id = ?, name = ?, category = ?, power = ?, hours = ?,
+                    flexible = ?, enabled = ?
                 WHERE id = ?
                 """,
                 (
@@ -196,36 +195,34 @@ def update_device(device_id: int, device: DeviceInput):
                     device_id,
                 ),
             )
-
-            return serialize_device(find_device(connection, device_id))
+            return serialize_device(
+                find_device(connection, device_id, user["id"])
+            )
 
 
 @router.patch("/{device_id}", response_model=DeviceResponse)
-def toggle_device(device_id: int, payload: DeviceToggle):
+def toggle_device(
+    device_id: int,
+    payload: DeviceToggle,
+    user=Depends(get_current_user),
+):
     with closing(get_connection()) as connection:
         with connection:
-            find_device(connection, device_id)
-
+            find_device(connection, device_id, user["id"])
             connection.execute(
                 "UPDATE devices SET enabled = ? WHERE id = ?",
                 (int(payload.enabled), device_id),
             )
-
-            return serialize_device(find_device(connection, device_id))
+            return serialize_device(
+                find_device(connection, device_id, user["id"])
+            )
 
 
 @router.delete("/{device_id}")
-def delete_device(device_id: int):
+def delete_device(device_id: int, user=Depends(get_current_user)):
     with closing(get_connection()) as connection:
         with connection:
-            find_device(connection, device_id)
+            find_device(connection, device_id, user["id"])
+            connection.execute("DELETE FROM devices WHERE id = ?", (device_id,))
 
-            connection.execute(
-                "DELETE FROM devices WHERE id = ?",
-                (device_id,),
-            )
-
-    return {
-        "message": "Device deleted successfully",
-        "id": device_id,
-    }
+    return {"message": "Device deleted successfully", "id": device_id}

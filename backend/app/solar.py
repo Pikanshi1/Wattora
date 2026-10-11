@@ -1,11 +1,15 @@
 
-from pathlib import Path
 import sqlite3
+from contextlib import closing
+from functools import lru_cache
+from pathlib import Path
 
 import joblib
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+
+from app.auth import get_current_user
 
 router = APIRouter(prefix="/api/solar", tags=["Solar Forecast"])
 
@@ -25,8 +29,7 @@ class SolarPredictionRequest(BaseModel):
     # Model plant identifier, not the database site ID.
     plant_id: int = Field(default=1, ge=1, le=2)
 
-    # Optional ID of the Wattora site selected in the frontend.
-    site_id: int | None = Field(default=None, ge=1)
+    site_id: int = Field(ge=1)
 
     ambient_temperature: float = Field(ge=-50, le=70)
     module_temperature: float = Field(ge=-50, le=100)
@@ -36,7 +39,7 @@ class SolarPredictionRequest(BaseModel):
     month: int = Field(ge=1, le=12)
 
 
-def get_site_solar_capacity(site_id: int) -> float:
+def get_site_solar_capacity(site_id: int, owner_id: int) -> float:
     """Return the selected site's configured solar capacity in kW."""
     if not DB_PATH.exists():
         raise HTTPException(
@@ -45,10 +48,10 @@ def get_site_solar_capacity(site_id: int) -> float:
         )
 
     try:
-        with sqlite3.connect(DB_PATH) as connection:
+        with closing(sqlite3.connect(DB_PATH)) as connection:
             row = connection.execute(
-                "SELECT solar_capacity FROM sites WHERE id = ?",
-                (site_id,),
+                "SELECT solar_capacity FROM sites WHERE id = ? AND owner_id = ?",
+                (site_id, owner_id),
             ).fetchone()
     except sqlite3.Error as exc:
         raise HTTPException(
@@ -65,6 +68,53 @@ def get_site_solar_capacity(site_id: int) -> float:
     return max(0.0, float(row[0]))
 
 
+@lru_cache(maxsize=2)
+def get_reference_peak_power(plant_id: int) -> float:
+    samples = []
+    for hour in range(24):
+        for irradiation in (0.0, 0.25, 0.5, 0.75, 1.0):
+            values = {
+                "PLANT_ID": plant_id,
+                "AMBIENT_TEMPERATURE": 25,
+                "MODULE_TEMPERATURE": 35,
+                "IRRADIATION": irradiation,
+                "HOUR": hour,
+                "DAY_OF_YEAR": 180,
+                "MONTH": 6,
+            }
+            samples.append([values[name] for name in FEATURES])
+
+    peak = float(model.predict(pd.DataFrame(samples, columns=FEATURES)).max())
+    if peak <= 0:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not determine a valid solar-model reference output.",
+        )
+    return peak
+
+
+def scale_power_to_site_capacity(
+    predicted_power: float,
+    site_capacity_kw: float,
+    plant_id: int,
+) -> float:
+    normalized_unit = str(UNIT).strip().lower().replace(" ", "")
+    if normalized_unit in {"w", "watt", "watts"}:
+        return (
+            predicted_power
+            / get_reference_peak_power(plant_id)
+            * site_capacity_kw
+            * 1000
+        )
+    if normalized_unit in {"kw", "kilowatt", "kilowatts"}:
+        return (
+            predicted_power
+            / get_reference_peak_power(plant_id)
+            * site_capacity_kw
+        )
+    return predicted_power
+
+
 def apply_site_capacity_limit(
     predicted_power: float,
     site_capacity_kw: float,
@@ -73,7 +123,8 @@ def apply_site_capacity_limit(
     Limit predicted output to configured site capacity when the model's
     output unit is explicitly recognized as W or kW.
 
-    This is a physical upper bound, not a recalibration of the trained model.
+    Predictions are normalized to the user's configured site capacity before
+    this physical upper bound is applied.
     """
     normalized_unit = str(UNIT).strip().lower().replace(" ", "")
 
@@ -89,7 +140,10 @@ def apply_site_capacity_limit(
 
 
 @router.post("/predict")
-def predict_solar(request: SolarPredictionRequest):
+def predict_solar(
+    request: SolarPredictionRequest,
+    user=Depends(get_current_user),
+):
     try:
         values = {
             "PLANT_ID": request.plant_id,
@@ -119,15 +173,16 @@ def predict_solar(request: SolarPredictionRequest):
         )
 
         prediction = max(0.0, float(model.predict(features)[0]))
-
-        site_capacity_kw = None
-
-        if request.site_id is not None:
-            site_capacity_kw = get_site_solar_capacity(request.site_id)
-            prediction = apply_site_capacity_limit(
-                prediction,
-                site_capacity_kw,
-            )
+        site_capacity_kw = get_site_solar_capacity(request.site_id, user["id"])
+        prediction = scale_power_to_site_capacity(
+            prediction,
+            site_capacity_kw,
+            request.plant_id,
+        )
+        prediction = apply_site_capacity_limit(
+            prediction,
+            site_capacity_kw,
+        )
 
         response = {
             "predicted_power": round(prediction, 3),
@@ -136,9 +191,8 @@ def predict_solar(request: SolarPredictionRequest):
             "model": "solar_model",
         }
 
-        if request.site_id is not None:
-            response["site_id"] = request.site_id
-            response["site_solar_capacity_kw"] = site_capacity_kw
+        response["site_id"] = request.site_id
+        response["site_solar_capacity_kw"] = site_capacity_kw
 
         return response
 
