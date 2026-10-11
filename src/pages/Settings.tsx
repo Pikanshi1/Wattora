@@ -1,5 +1,5 @@
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
@@ -19,6 +19,11 @@ import {
   Zap,
   BatteryCharging,
 } from 'lucide-react'
+import {
+  getUserPreferences,
+  saveUserPreferences,
+  type UserPreferences,
+} from '../services/api'
 
 const navItems = [
   { label: 'Overview', icon: LayoutDashboard, href: '/dashboard' },
@@ -26,6 +31,28 @@ const navItems = [
   { label: 'Energy demand', icon: Activity, href: '/energy' },
   { label: 'Optimization', icon: Zap, href: '/optimization' },
   { label: 'Devices', icon: BatteryCharging, href: '/devices' },
+]
+
+const priorityOptions: {
+  value: UserPreferences['optimization_priority']
+  title: string
+  detail: string
+}[] = [
+  {
+    value: 'savings',
+    title: 'Lower cost',
+    detail: 'Prioritize estimated bill savings.',
+  },
+  {
+    value: 'balanced',
+    title: 'Balanced',
+    detail: 'Balance cost and solar usage.',
+  },
+  {
+    value: 'solar',
+    title: 'Use more solar',
+    detail: 'Favor available renewable energy.',
+  },
 ]
 
 function Toggle({
@@ -73,16 +100,87 @@ export default function Settings() {
   const [weeklySummary, setWeeklySummary] = useState(false)
   const [highUsageAlerts, setHighUsageAlerts] = useState(true)
   const [forecastHorizon, setForecastHorizon] = useState('24')
-  const [forecastInterval, setForecastInterval] = useState('hourly')
-  const [optimizationPriority, setOptimizationPriority] = useState('balanced')
+  const [forecastInterval, setForecastInterval] =
+    useState<UserPreferences['forecast_interval']>('hourly')
+  const [optimizationPriority, setOptimizationPriority] =
+    useState<UserPreferences['optimization_priority']>('balanced')
   const [batteryReserve, setBatteryReserve] = useState(20)
   const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saveSucceeded, setSaveSucceeded] = useState(false)
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadPreferences() {
+      try {
+        const preferences = await getUserPreferences()
+        if (cancelled) return
+
+        setSolarAlerts(preferences.solar_alerts)
+        setDemandAlerts(preferences.demand_alerts)
+        setHighUsageAlerts(preferences.high_usage_alerts)
+        setWeeklySummary(preferences.weekly_summary)
+        setForecastHorizon(String(preferences.forecast_horizon))
+        setForecastInterval(preferences.forecast_interval)
+        setOptimizationPriority(preferences.optimization_priority)
+        setBatteryReserve(preferences.battery_reserve)
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(
+            error instanceof Error
+              ? error.message
+              : 'Unable to load your settings.',
+          )
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void loadPreferences()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setMessage(
-      'Settings updated for this session. Connect the backend to store them permanently.',
-    )
+    setSaving(true)
+    setSaveSucceeded(false)
+    setMessage('')
+
+    const preferences: UserPreferences = {
+      solar_alerts: solarAlerts,
+      demand_alerts: demandAlerts,
+      high_usage_alerts: highUsageAlerts,
+      weekly_summary: weeklySummary,
+      forecast_horizon: Number(forecastHorizon),
+      forecast_interval: forecastInterval,
+      optimization_priority: optimizationPriority,
+      battery_reserve: batteryReserve,
+    }
+
+    try {
+      const saved = await saveUserPreferences(preferences)
+      setSolarAlerts(saved.solar_alerts)
+      setDemandAlerts(saved.demand_alerts)
+      setHighUsageAlerts(saved.high_usage_alerts)
+      setWeeklySummary(saved.weekly_summary)
+      setForecastHorizon(String(saved.forecast_horizon))
+      setForecastInterval(saved.forecast_interval)
+      setOptimizationPriority(saved.optimization_priority)
+      setBatteryReserve(saved.battery_reserve)
+      setSaveSucceeded(true)
+      setMessage('Your settings have been saved.')
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : 'Unable to save your settings.',
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -208,8 +306,8 @@ export default function Settings() {
                 />
               </div>
               <p className="mt-3 rounded-xl bg-[#F4F8F3] p-3 text-xs leading-5 text-[#718276]">
-                These switches currently update the interface only. Actual
-                notifications require a backend and delivery service.
+                These notification preferences are saved to your account. Sending
+                alerts requires an email or push-notification delivery service.
               </p>
             </section>
 
@@ -251,7 +349,11 @@ export default function Settings() {
                   <select
                     id="interval"
                     value={forecastInterval}
-                    onChange={(event) => setForecastInterval(event.target.value)}
+                    onChange={(event) =>
+                      setForecastInterval(
+                        event.target.value === 'daily' ? 'daily' : 'hourly',
+                      )
+                    }
                     className="w-full rounded-xl border border-[#DCE6D9] bg-white px-4 py-3 text-sm outline-none focus:border-[#43865A]"
                   >
                     <option value="hourly">Hourly</option>
@@ -264,8 +366,7 @@ export default function Settings() {
                 <Clock size={18} className="mt-0.5 shrink-0 text-[#43865A]" />
                 <p className="text-xs leading-5 text-[#718276]">
                   Selected: {forecastHorizon === '168' ? '7 days' : `${forecastHorizon} hours`},
-                  {' '}{forecastInterval} detail. The forecast page will use these
-                  preferences once the settings are connected.
+                  {' '}{forecastInterval} detail.
                 </p>
               </div>
             </section>
@@ -286,23 +387,7 @@ export default function Settings() {
               <div className="mt-6">
                 <p className="mb-3 text-sm font-medium">Optimization priority</p>
                 <div className="grid gap-3 sm:grid-cols-3">
-                  {[
-                    {
-                      value: 'savings',
-                      title: 'Lower cost',
-                      detail: 'Prioritize estimated bill savings.',
-                    },
-                    {
-                      value: 'balanced',
-                      title: 'Balanced',
-                      detail: 'Balance cost and solar usage.',
-                    },
-                    {
-                      value: 'solar',
-                      title: 'Use more solar',
-                      detail: 'Favor available renewable energy.',
-                    },
-                  ].map((option) => (
+                  {priorityOptions.map((option) => (
                     <button
                       key={option.value}
                       type="button"
@@ -384,15 +469,19 @@ export default function Settings() {
               </Link>
 
               <div className="mt-3 rounded-xl bg-[#F4F8F3] p-4 text-xs leading-5 text-[#718276]">
-                Password changes, verified email, and active sessions will be
-                implemented when authentication is connected.
+                Password changes and active-session management are not currently
+                available.
               </div>
             </section>
 
             {message && (
               <div
                 role="status"
-                className="rounded-xl bg-[#E7F1E5] p-4 text-sm leading-6 text-[#315A40]"
+                className={`rounded-xl p-4 text-sm leading-6 ${
+                  saveSucceeded
+                    ? 'bg-[#E7F1E5] text-[#315A40]'
+                    : 'bg-[#FBEDE7] text-[#A45D43]'
+                }`}
               >
                 {message}
               </div>
@@ -400,14 +489,15 @@ export default function Settings() {
 
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs leading-5 text-[#94A397]">
-                Demo mode: settings are not saved after refreshing the page.
+                {loading ? 'Loading settings…' : 'Settings are saved to your account.'}
               </p>
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#43865A] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#36734B]"
+                disabled={loading || saving}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#43865A] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#36734B] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save size={17} />
-                Save settings
+                {saving ? 'Saving…' : 'Save settings'}
               </button>
             </div>
           </form>
@@ -420,9 +510,9 @@ export default function Settings() {
               <div>
                 <h3 className="font-semibold">Small changes, smarter energy</h3>
                 <p className="mt-2 text-sm leading-6 text-[#526F5A]">
-                  These preferences are the interface foundation. The next step
-                  is connecting them to Wattora’s forecasting and optimization
-                  services so they influence actual model outputs.
+                  These preferences are stored with your account. The current
+                  forecasting models and optimizer do not yet use these choices
+                  to alter their predictions.
                 </p>
                 <Link
                   to="/optimization"

@@ -1,6 +1,6 @@
 
 import { useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   ArrowRight,
@@ -11,18 +11,29 @@ import {
   Leaf,
   LockKeyhole,
 } from 'lucide-react'
+import { resetPassword } from '../services/api'
 
 export default function ResetPassword() {
+  const [searchParams] = useSearchParams()
+  const token = searchParams.get('token') ?? ''
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState(
+    token ? '' : 'This password reset link is missing or invalid.',
+  )
   const [success, setSuccess] = useState(false)
+  const [loading, setLoading] = useState(false)
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setMessage('')
+
+    if (!token) {
+      setMessage('This password reset link is missing or invalid.')
+      return
+    }
 
     if (password.length < 8) {
       setMessage('Your password must contain at least 8 characters.')
@@ -34,7 +45,19 @@ export default function ResetPassword() {
       return
     }
 
-    setSuccess(true)
+    setLoading(true)
+    try {
+      await resetPassword({ token, password })
+      setSuccess(true)
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'Unable to update your password.',
+      )
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -54,16 +77,16 @@ export default function ResetPassword() {
         </span>
 
         <h1 className="mt-6 text-3xl font-semibold tracking-tight text-[#244A35]">
-          {success ? 'Password ready to update' : 'Create a new password'}
+          {success ? 'Password updated' : 'Create a new password'}
         </h1>
 
         <p className="mt-3 text-sm leading-6 text-[#718276]">
           {success
-            ? 'Your passwords match. Once the authentication backend is connected, you can securely save your new password.'
+            ? 'Your password was changed. Sign in with your new password to continue.'
             : 'Choose a strong password for your Wattora account. Use at least 8 characters.'}
         </p>
 
-        {!success ? (
+        {!success && token ? (
           <form onSubmit={handleSubmit} className="mt-8 space-y-5">
             <div>
               <label htmlFor="newPassword" className="mb-2 block text-sm font-medium text-[#315A40]">
@@ -130,18 +153,33 @@ export default function ResetPassword() {
 
             <button
               type="submit"
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B] focus:outline-none focus:ring-4 focus:ring-[#43865A]/20"
+              disabled={loading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B] focus:outline-none focus:ring-4 focus:ring-[#43865A]/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Update password <ArrowRight size={17} />
+              {loading ? 'Updating…' : 'Update password'} <ArrowRight size={17} />
             </button>
           </form>
-        ) : (
+        ) : success ? (
           <Link
             to="/signin"
             className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B]"
           >
             Continue to sign in <ArrowRight size={17} />
           </Link>
+        ) : (
+          <div className="mt-8 space-y-4">
+            {message && (
+              <p role="alert" className="rounded-xl border border-[#E8D9D5] bg-[#FBF5F3] px-4 py-3 text-sm text-[#965D50]">
+                {message}
+              </p>
+            )}
+            <Link
+              to="/forgot-password"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B]"
+            >
+              Request a new reset link <ArrowRight size={17} />
+            </Link>
+          </div>
         )}
 
         <div className="mt-8 border-t border-[#E6ECE3] pt-6">

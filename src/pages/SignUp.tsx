@@ -1,6 +1,6 @@
 
 import { useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   Eye,
@@ -10,18 +10,47 @@ import {
   Mail,
   UserRound,
 } from 'lucide-react'
+import { registerUser } from '../services/api'
+
+
 
 export default function SignUp() {
+  const navigate = useNavigate()
   const [showPassword, setShowPassword] = useState(false)
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setMessage('Account creation will be enabled when authentication is connected.')
+
+async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault()
+  setMessage('')
+
+  if (!fullName.trim()) {
+    setMessage('Please enter your full name.')
+    return
   }
+
+  setSubmitting(true)
+  try {
+    const result = await registerUser({
+      full_name: fullName.trim(),
+      email: email.trim(),
+      password,
+    })
+    navigate(
+      `/verify-email?email=${encodeURIComponent(result.email)}&sent=${result.email_sent}&message=${encodeURIComponent(result.message)}`,
+    )
+  } catch (error) {
+    setMessage(
+      error instanceof Error ? error.message : 'Registration failed.',
+    )
+  } finally {
+    setSubmitting(false)
+  }
+}
 
   return (
     <main className="min-h-screen bg-[#F4F8F3] p-3 sm:p-6 lg:p-8">
@@ -153,9 +182,10 @@ export default function SignUp() {
 
               <button
                 type="submit"
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B] focus:outline-none focus:ring-4 focus:ring-[#43865A]/20"
+                disabled={submitting}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B] focus:outline-none focus:ring-4 focus:ring-[#43865A]/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Create account <ArrowRight size={17} />
+                {submitting ? 'Creating account…' : 'Create account'} <ArrowRight size={17} />
               </button>
             </form>
 

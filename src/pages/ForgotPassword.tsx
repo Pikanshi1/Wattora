@@ -9,14 +9,30 @@ import {
   Mail,
   ShieldCheck,
 } from 'lucide-react'
+import { requestPasswordReset } from '../services/api'
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSubmitted(true)
+    setError('')
+    setLoading(true)
+    try {
+      await requestPasswordReset(email.trim())
+      setSubmitted(true)
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : 'Unable to send password reset instructions.',
+      )
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -41,7 +57,7 @@ export default function ForgotPassword() {
 
         <p className="mt-3 text-sm leading-6 text-[#718276]">
           {submitted
-            ? 'If an account exists for this email, you will receive instructions to reset your password once email delivery is connected.'
+            ? 'If an account exists for this email, password reset instructions have been sent.'
             : 'No worries. Enter the email address associated with your account and we’ll help you get back in.'}
         </p>
 
@@ -67,11 +83,18 @@ export default function ForgotPassword() {
               </div>
             </div>
 
+            {error && (
+              <p role="alert" className="rounded-xl bg-[#FBF5F3] p-3 text-sm text-[#965D50]">
+                {error}
+              </p>
+            )}
+
             <button
               type="submit"
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B] focus:outline-none focus:ring-4 focus:ring-[#43865A]/20"
+              disabled={loading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B] focus:outline-none focus:ring-4 focus:ring-[#43865A]/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Send reset instructions <ArrowRight size={17} />
+              {loading ? 'Sending…' : 'Send reset instructions'} <ArrowRight size={17} />
             </button>
           </form>
         ) : (

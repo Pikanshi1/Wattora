@@ -158,18 +158,15 @@ function makeSolarInput(hour: number, date: Date, site: Site) {
   }
 }
 
-function makeEnergyInput(hour: number, date: Date) {
+function makeEnergyInput(hour: number, date: Date, site: Site) {
   return {
+    site_id: site.id,
     hour,
     day_of_week: date.getDay(),
     day_of_year: getDayOfYear(date),
     month: date.getMonth() + 1,
     is_weekend: date.getDay() === 0 || date.getDay() === 6 ? 1 : 0,
 
-    // Illustrative inputs, not live meter readings.
-    lag_1h: 1,
-    lag_24h: 1.2,
-    lag_168h: 1.1,
   }
 }
 
@@ -277,7 +274,7 @@ export default function Dashboard() {
           forecastHours.map(async (hour) => {
             const [solarResult, energyResult] = await Promise.all([
               predictSolar(makeSolarInput(hour, forecastDate, site)),
-              predictEnergy(makeEnergyInput(hour, forecastDate)),
+              predictEnergy(makeEnergyInput(hour, forecastDate, site)),
             ])
 
             const solarKw = toKilowatts(
@@ -295,8 +292,8 @@ export default function Dashboard() {
 
             try {
               const optimization = await optimizeEnergy(
+                site.id,
                 toWatts(solarKw, 'kW'),
-                demandKw,
               )
 
               status = optimization.status

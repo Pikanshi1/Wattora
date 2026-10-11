@@ -34,7 +34,6 @@ import type {
 import {
   chooseActiveSite,
   getActiveSiteId,
-  setActiveSiteId,
 } from '../services/activeSite'
 
 const START_OPTIONS = [
@@ -133,7 +132,6 @@ export default function Optimization() {
   const [solarPriority, setSolarPriority] = useState(70)
   const [costPriority, setCostPriority] = useState(30)
 
-  const [sites, setSites] = useState<Site[]>([])
   const [activeSite, setActiveSite] = useState<Site | null>(null)
   const [devices, setDevices] = useState<PlannerDevice[]>([])
 
@@ -149,16 +147,10 @@ export default function Optimization() {
 
  
 const loadSiteData = useCallback(async () => {
-  setSiteLoading(true)
-  setDevicesLoading(false)
-  setSiteError('')
-  setApiError('')
-
   try {
     const siteResults = await getSites()
     const selectedSite = chooseActiveSite(siteResults)
 
-    setSites(siteResults)
     setActiveSite(selectedSite)
 
     if (!selectedSite) {
@@ -203,11 +195,15 @@ const loadSiteData = useCallback(async () => {
 
 
   useEffect(() => {
-    void loadSiteData()
+    void Promise.resolve().then(loadSiteData)
 
     const handleSiteChange = () => {
       setAnalysis(null)
       setGenerated(false)
+      setSiteLoading(true)
+      setDevicesLoading(false)
+      setSiteError('')
+      setApiError('')
       void loadSiteData()
     }
 
@@ -229,12 +225,11 @@ const loadSiteData = useCallback(async () => {
     [devices],
   )
 
-  // Device power is assumed to be stored in watts by the backend.
-  // Connected load is the sum of the currently enabled devices.
+  // Device power is stored in kW by the backend.
   const activeDemandKw = useMemo(
     () =>
       activeDevices.reduce(
-        (total, device) => total + Math.max(0, device.power) / 1000,
+        (total, device) => total + Math.max(0, device.power),
         0,
       ),
     [activeDevices],
@@ -335,13 +330,9 @@ const loadSiteData = useCallback(async () => {
         solarResult.unit,
       )
 
-      // Demand is derived from enabled devices returned by the Devices API.
-      // The optimizer accepts demand in kW and solar power in watts.
-      const demandKw = activeDemandKw
-
       const result = await optimizeEnergy(
+        activeSite.id,
         solarPowerWatts,
-        demandKw,
       )
 
       setAnalysis(result)
@@ -709,7 +700,7 @@ const loadSiteData = useCallback(async () => {
                               {device.name}
                             </p>
                             <p className="mt-1 text-xs text-[#718276]">
-                              {formatPowerWatts(device.power)} ·{' '}
+                              {formatPowerWatts(device.power * 1000)} ·{' '}
                               {formatDuration(device.hours)}
                             </p>
                             <p className="mt-1 text-xs text-[#94A397]">
@@ -916,7 +907,7 @@ const loadSiteData = useCallback(async () => {
                           {device.name}
                         </p>
                         <p className="mt-1 text-xs text-[#718276]">
-                          {formatPowerWatts(device.power)} ·{' '}
+                          {formatPowerWatts(device.power * 1000)} ·{' '}
                           {formatDuration(device.hours)}
                         </p>
                       </div>

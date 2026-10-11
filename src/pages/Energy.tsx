@@ -120,6 +120,20 @@ export default function Energy() {
     let cancelled = false
 
     async function loadForecast() {
+      if (siteLoading) {
+        setLoading(true)
+        return
+      }
+
+      if (!activeSite) {
+        setChartData([])
+        setLoading(false)
+        setApiError(
+          siteError || 'Create or select a site to view its energy forecast.',
+        )
+        return
+      }
+
       setLoading(true)
       setApiError('')
       setChartData([])
@@ -152,16 +166,12 @@ export default function Energy() {
         const predictions = await Promise.all(
           forecastHours.map(async (hour): Promise<DemandPoint> => {
             const result = await predictEnergy({
+              site_id: activeSite.id,
               hour,
               day_of_week: dayOfWeek,
               day_of_year: dayOfYear,
               month: targetDate.getMonth() + 1,
               is_weekend: isWeekend,
-
-              // Illustrative lag values, not live household meter readings.
-              lag_1h: 1.0,
-              lag_24h: 1.2,
-              lag_168h: 1.1,
             })
 
             return {
@@ -198,7 +208,7 @@ export default function Energy() {
     return () => {
       cancelled = true
     }
-  }, [period])
+  }, [period, activeSite, siteLoading, siteError])
 
   const peak = chartData.length
     ? chartData.reduce(

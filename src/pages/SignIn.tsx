@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Sun,
 } from 'lucide-react'
+import { loginUser } from '../services/api'
 
 export default function SignIn() {
   const navigate = useNavigate()
@@ -20,18 +21,26 @@ export default function SignIn() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setError('')
+ 
+async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault()
+  setError('')
 
-    if (!email.trim() || !password) {
-      setError('Please enter your email address and password.')
-      return
-    }
-
-    // Authentication will be connected to the backend later.
-    setError('Sign-in is not connected yet. Authentication will be added next.')
+  if (!email.trim() || !password) {
+    setError('Please enter your email address and password.')
+    return
   }
+
+  try {
+    await loginUser({ email: email.trim(), password })
+    navigate('/dashboard')
+  } catch (error) {
+    setError(
+      error instanceof Error ? error.message : 'Sign-in failed.',
+    )
+  }
+}
+
 
   return (
     <main className="min-h-screen bg-[#F4F8F3] p-3 sm:p-5 lg:p-8">
@@ -189,12 +198,20 @@ export default function SignIn() {
               </div>
 
               {error && (
-                <p
+                <div
                   role="status"
                   className="rounded-xl border border-[#E5D9C8] bg-[#FBF7F0] px-4 py-3 text-sm leading-5 text-[#785C36]"
                 >
-                  {error}
-                </p>
+                  <p>{error}</p>
+                  {error.toLowerCase().includes('verify') && (
+                    <Link
+                      to={`/verify-email?email=${encodeURIComponent(email.trim())}`}
+                      className="mt-2 inline-block font-semibold underline"
+                    >
+                      Verify your email
+                    </Link>
+                  )}
+                </div>
               )}
 
               <button

@@ -1,39 +1,58 @@
-
 import { useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
   Leaf,
-  MailCheck,
-  RefreshCw,
+  Mail,
   ShieldCheck,
 } from 'lucide-react'
+import { resendVerification, verifyEmail } from '../services/api'
 
 export default function VerifyEmail() {
+  const [searchParams] = useSearchParams()
+  const [email, setEmail] = useState(searchParams.get('email') ?? '')
   const [code, setCode] = useState('')
-  const [submitted, setSubmitted] = useState(false)
-  const [resent, setResent] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState(searchParams.get('message') ?? '')
+  const [success, setSuccess] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [resending, setResending] = useState(false)
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setMessage('')
+    setSubmitting(true)
 
-    if (!/^\d{6}$/.test(code)) {
-      setMessage('Please enter a valid 6-digit verification code.')
-      return
+    try {
+      const result = await verifyEmail({ email: email.trim(), code })
+      setSuccess(true)
+      setMessage(result.message)
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : 'Unable to verify your email.',
+      )
+    } finally {
+      setSubmitting(false)
     }
-
-    setSubmitted(true)
   }
 
-  function handleResend() {
-    setResent(true)
-    setMessage(
-      'Email delivery is not connected yet. Verification codes will be sent after authentication is configured.',
-    )
+  async function handleResend() {
+    setMessage('')
+    setResending(true)
+
+    try {
+      const result = await resendVerification(email.trim())
+      setMessage(result.message)
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'Unable to resend the verification code.',
+      )
+    } finally {
+      setResending(false)
+    }
   }
 
   return (
@@ -48,37 +67,55 @@ export default function VerifyEmail() {
           </span>
         </Link>
 
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#E7F1E5] text-[#43865A]">
-          {submitted ? (
-            <CheckCircle2 size={27} />
-          ) : (
-            <MailCheck size={27} />
-          )}
+        <div className="mb-7 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#E7F1E5] text-[#43865A]">
+          {success ? <CheckCircle2 size={27} /> : <ShieldCheck size={27} />}
         </div>
 
-        <h1 className="mt-6 text-3xl font-semibold tracking-tight text-[#244A35]">
-          {submitted ? 'Email verified!' : 'Verify your email'}
+        <h1 className="text-3xl font-semibold tracking-tight text-[#244A35]">
+          {success ? 'Email verified' : 'Verify your email'}
         </h1>
 
         <p className="mt-3 text-sm leading-6 text-[#718276]">
-          {submitted
-            ? 'The code format is valid. Actual email verification will work once the authentication backend is connected.'
-            : 'We use email verification to help keep your Wattora account secure. Enter the 6-digit code provided in your email.'}
+          {success
+            ? 'Your email is verified. Sign in to continue to Wattora.'
+            : 'Enter the six-digit code sent to your email address. The code expires in 15 minutes.'}
         </p>
 
-        {!submitted ? (
+        {!success && (
           <form onSubmit={handleSubmit} className="mt-8 space-y-5">
             <div>
               <label
-                htmlFor="verificationCode"
+                htmlFor="email"
+                className="mb-2 block text-sm font-medium text-[#315A40]"
+              >
+                Email address
+              </label>
+              <div className="flex items-center gap-3 rounded-xl border border-[#DCE6D9] px-4 transition focus-within:border-[#43865A] focus-within:ring-4 focus-within:ring-[#43865A]/10">
+                <Mail size={18} className="shrink-0 text-[#91A093]" />
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  className="min-w-0 flex-1 bg-transparent py-3.5 text-sm text-[#244A35] outline-none placeholder:text-[#A0ADA1]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="code"
                 className="mb-2 block text-sm font-medium text-[#315A40]"
               >
                 Verification code
               </label>
-
               <input
-                id="verificationCode"
-                name="verificationCode"
+                id="code"
+                name="code"
                 type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"
@@ -86,22 +123,18 @@ export default function VerifyEmail() {
                 maxLength={6}
                 required
                 value={code}
-                onChange={(event) => {
+                onChange={(event) =>
                   setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
-                  setMessage('')
-                }}
-                placeholder="000000"
-                className="w-full rounded-xl border border-[#DCE6D9] bg-[#FCFDFC] px-4 py-4 text-center text-2xl font-semibold tracking-[0.5em] text-[#244A35] outline-none placeholder:text-[#C4CEC2] focus:border-[#43865A] focus:ring-4 focus:ring-[#43865A]/10"
+                }
+                placeholder="123456"
+                className="w-full rounded-xl border border-[#DCE6D9] bg-white px-4 py-3.5 text-sm tracking-[0.3em] text-[#244A35] outline-none transition placeholder:text-[#A0ADA1] focus:border-[#43865A] focus:ring-4 focus:ring-[#43865A]/10"
               />
-              <p className="mt-2 text-xs text-[#718276]">
-                Enter all 6 digits.
-              </p>
             </div>
 
             {message && (
               <p
                 role="status"
-                className="rounded-xl border border-[#DCE6D9] bg-[#F4F8F3] px-4 py-3 text-sm text-[#315A40]"
+                className="rounded-xl border border-[#E5D9C8] bg-[#FBF7F0] px-4 py-3 text-sm leading-5 text-[#785C36]"
               >
                 {message}
               </p>
@@ -109,49 +142,40 @@ export default function VerifyEmail() {
 
             <button
               type="submit"
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B] focus:outline-none focus:ring-4 focus:ring-[#43865A]/20"
+              disabled={submitting}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B] focus:outline-none focus:ring-4 focus:ring-[#43865A]/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Verify email <ArrowRight size={17} />
+              {submitting ? 'Verifying…' : 'Verify email'} <ArrowRight size={17} />
             </button>
 
-            <div className="text-center">
-              <span className="text-sm text-[#718276]">
-                Didn’t receive a code?{' '}
-              </span>
-              <button
-                type="button"
-                onClick={handleResend}
-                className="inline-flex items-center gap-1 text-sm font-semibold text-[#43865A] hover:text-[#315A40]"
-              >
-                <RefreshCw size={13} />
-                Resend code
-              </button>
-            </div>
-
-            {resent && (
-              <p className="text-center text-xs leading-5 text-[#718276]">
-                Email delivery is not configured yet.
-              </p>
-            )}
-          </form>
-        ) : (
-          <div className="mt-8 space-y-4">
-            <div className="flex items-start gap-3 rounded-xl border border-[#DCE6D9] bg-[#F4F8F3] p-4">
-              <ShieldCheck size={21} className="mt-0.5 shrink-0 text-[#43865A]" />
-              <p className="text-sm leading-6 text-[#315A40]">
-                The verification screen is working. Real verification still
-                needs to be connected to your authentication service.
-              </p>
-            </div>
-
-            <Link
-              to="/signin"
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B]"
+            <button
+              type="button"
+              onClick={handleResend}
+              disabled={resending || !email.trim()}
+              className="w-full rounded-xl border border-[#D6E2D4] px-5 py-3.5 text-sm font-semibold text-[#315A40] transition hover:bg-[#F4F8F3] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Continue to sign in <ArrowRight size={17} />
-            </Link>
-          </div>
+              {resending ? 'Sending…' : 'Resend code'}
+            </button>
+          </form>
         )}
+
+        {success && message && (
+          <p
+            role="status"
+            className="mt-6 rounded-xl bg-[#F4F8F3] px-4 py-3 text-sm text-[#315A40]"
+          >
+            {message}
+          </p>
+        )}
+
+        {success ? (
+          <Link
+            to="/signin"
+            className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-[#43865A] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#36734B]"
+          >
+            Continue to sign in <ArrowRight size={17} />
+          </Link>
+        ) : null}
 
         <div className="mt-8 border-t border-[#E6ECE3] pt-6">
           <Link

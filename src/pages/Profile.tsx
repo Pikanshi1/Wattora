@@ -1,12 +1,11 @@
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
   ArrowLeft,
   ArrowRight,
   BatteryCharging,
-  Check,
   House,
   LayoutDashboard,
   Leaf,
@@ -17,6 +16,11 @@ import {
   UserRound,
   Zap,
 } from 'lucide-react'
+import {
+  getUserProfile,
+  saveUserProfile,
+  type UserProfile,
+} from '../services/api'
 
 const navItems = [
   { label: 'Overview', icon: LayoutDashboard, href: '/dashboard' },
@@ -27,8 +31,8 @@ const navItems = [
 ]
 
 export default function Profile() {
-  const [fullName, setFullName] = useState('Wattora User')
-  const [email, setEmail] = useState('user@example.com')
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
   const [location, setLocation] = useState('')
   const [homeType, setHomeType] = useState('House')
   const [solarCapacity, setSolarCapacity] = useState('5')
@@ -36,32 +40,87 @@ export default function Profile() {
   const [energyUnit, setEnergyUnit] = useState('kWh')
   const [currency, setCurrency] = useState('INR')
   const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadProfile() {
+      try {
+        const profile: UserProfile = await getUserProfile()
+        if (cancelled) return
+
+        setFullName(profile.full_name)
+        setEmail(profile.email)
+        setLocation(profile.location)
+        setHomeType(profile.home_type)
+        setSolarCapacity(String(profile.solar_capacity))
+        setElectricityRate(String(profile.electricity_rate))
+        setEnergyUnit(profile.energy_unit)
+        setCurrency(profile.currency)
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(
+            error instanceof Error ? error.message : 'Unable to load your profile.',
+          )
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void loadProfile()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    if (!fullName.trim() || !email.trim()) {
-      setMessage('Please enter your name and email address.')
+    if (!fullName.trim()) {
+      setMessage('Please enter your name.')
       return
     }
 
     if (
-      solarCapacity.trim() !== '' &&
-      (!Number.isFinite(Number(solarCapacity)) || Number(solarCapacity) < 0)
+      !Number.isFinite(Number(solarCapacity)) ||
+      Number(solarCapacity) < 0
     ) {
       setMessage('Solar capacity must be zero or greater.')
       return
     }
 
     if (
-      electricityRate.trim() !== '' &&
-      (!Number.isFinite(Number(electricityRate)) || Number(electricityRate) < 0)
+      !Number.isFinite(Number(electricityRate)) ||
+      Number(electricityRate) < 0
     ) {
       setMessage('Electricity rate must be zero or greater.')
       return
     }
 
-    setMessage('Your changes are reflected on this page. Connect the backend to save them permanently.')
+    setSaving(true)
+    setMessage('')
+    try {
+      const profile = await saveUserProfile({
+        full_name: fullName.trim(),
+        location: location.trim(),
+        home_type: homeType,
+        solar_capacity: Number(solarCapacity),
+        electricity_rate: Number(electricityRate),
+        energy_unit: energyUnit,
+        currency,
+      })
+      setFullName(profile.full_name)
+      setMessage('Your profile has been saved.')
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : 'Unable to save your profile.',
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -150,7 +209,7 @@ export default function Profile() {
               <p className="mt-1 break-all text-sm text-[#718276]">{email || 'Your email'}</p>
               <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[#F4F8F3] px-3 py-1 text-xs font-medium text-[#526F5A]">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#43865A]" />
-                Local demo profile
+                Account profile
               </p>
             </div>
             <div className="rounded-xl bg-[#F4F8F3] px-4 py-3 text-sm text-[#526F5A]">
@@ -195,14 +254,14 @@ export default function Profile() {
                     id="email"
                     type="email"
                     value={email}
-                    onChange={(event) => setEmail(event.target.value)}
                     maxLength={254}
-                    required
+                    readOnly
+                    aria-describedby="email-help"
                     placeholder="you@example.com"
-                    className="w-full rounded-xl border border-[#DCE6D9] px-4 py-3 text-sm outline-none transition focus:border-[#43865A] focus:ring-4 focus:ring-[#43865A]/10"
+                    className="w-full rounded-xl border border-[#DCE6D9] bg-[#F4F8F3] px-4 py-3 text-sm outline-none"
                   />
-                  <p className="mt-2 text-xs text-[#94A397]">
-                    Account verification will be connected later.
+                  <p id="email-help" className="mt-2 text-xs text-[#94A397]">
+                    Email address changes are not currently supported.
                   </p>
                 </div>
               </div>
@@ -345,7 +404,7 @@ export default function Profile() {
               <div
                 role="status"
                 className={`rounded-xl p-4 text-sm leading-6 ${
-                  message.startsWith('Your changes')
+                  message.startsWith('Your profile')
                     ? 'bg-[#E7F1E5] text-[#315A40]'
                     : 'bg-[#FBEDE7] text-[#A45D43]'
                 }`}
@@ -356,14 +415,15 @@ export default function Profile() {
 
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs leading-5 text-[#94A397]">
-                Demo mode: profile details are not saved to a database.
+                {loading ? 'Loading profile…' : 'Profile details are saved to your account.'}
               </p>
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#43865A] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#36734B]"
+                disabled={loading || saving}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#43865A] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#36734B] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save size={17} />
-                Save preferences
+                {saving ? 'Saving…' : 'Save preferences'}
               </button>
             </div>
           </form>
@@ -376,8 +436,8 @@ export default function Profile() {
               <div>
                 <h3 className="font-semibold">Your next step</h3>
                 <p className="mt-2 text-sm leading-6 text-[#526F5A]">
-                  Once the backend is connected, these preferences can feed into
-                  the solar forecast, energy demand model, and optimization engine.
+                  Your saved home details are available to the Wattora energy
+                  workspace and can be used to configure your forecasts.
                 </p>
                 <Link
                   to="/optimization"

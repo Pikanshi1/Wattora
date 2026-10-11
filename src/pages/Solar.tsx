@@ -176,7 +176,7 @@ export default function Solar() {
     ambientTemperature,
     moduleTemperature,
     irradiation,
-    activeSite?.id,
+    activeSite,
     siteLoading,
     siteError,
   ]);
