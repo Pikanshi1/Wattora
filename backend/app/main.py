@@ -11,6 +11,7 @@ from app.energy import router as energy_router
 from app.optimizer import router as optimizer_router
 from app.sites import router as sites_router
 from app.solar import router as solar_router
+from database import init_app_tables
 
 frontend_origins = {
     origin.strip()
@@ -25,6 +26,7 @@ frontend_origins = {
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     init_auth_tables()
+    init_app_tables()
     yield
 
 
@@ -66,6 +68,5 @@ def health_check():
         "status": "healthy",
         "application": "Wattora",
     }
-
 
 

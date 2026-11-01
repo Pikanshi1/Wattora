@@ -37,7 +37,9 @@ export function useActiveSiteData() {
   }, [])
 
   useEffect(() => {
-    void loadSites()
+    queueMicrotask(() => {
+      void loadSites()
+    })
 
     const handleSiteChange = () => {
       void loadSites()
@@ -58,7 +60,7 @@ export function useActiveSiteData() {
 
   useEffect(() => {
     if (!activeSite) {
-      setDevices([])
+      queueMicrotask(() => setDevices([]))
       return
     }
 

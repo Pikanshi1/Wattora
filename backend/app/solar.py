@@ -1,6 +1,4 @@
 
-import sqlite3
-from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
 
@@ -8,14 +6,15 @@ import joblib
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from app.auth import get_current_user
+from database import engine
 
 router = APIRouter(prefix="/api/solar", tags=["Solar Forecast"])
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_PATH = BASE_DIR / "models" / "solar_model.joblib"
-DB_PATH = BASE_DIR / "wattora.db"
 
 # Load the trained model bundle.
 saved_data = joblib.load(MODEL_PATH)
@@ -41,23 +40,14 @@ class SolarPredictionRequest(BaseModel):
 
 def get_site_solar_capacity(site_id: int, owner_id: int) -> float:
     """Return the selected site's configured solar capacity in kW."""
-    if not DB_PATH.exists():
-        raise HTTPException(
-            status_code=500,
-            detail="Wattora database was not found.",
-        )
-
-    try:
-        with closing(sqlite3.connect(DB_PATH)) as connection:
-            row = connection.execute(
-                "SELECT solar_capacity FROM sites WHERE id = ? AND owner_id = ?",
-                (site_id, owner_id),
-            ).fetchone()
-    except sqlite3.Error as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not read site configuration: {exc}",
-        ) from exc
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("""
+                SELECT solar_capacity FROM sites
+                WHERE id = :site_id AND owner_id = :owner_id
+            """),
+            {"site_id": site_id, "owner_id": owner_id},
+        ).mappings().first()
 
     if row is None:
         raise HTTPException(
@@ -65,7 +55,7 @@ def get_site_solar_capacity(site_id: int, owner_id: int) -> float:
             detail=f"Site {site_id} was not found.",
         )
 
-    return max(0.0, float(row[0]))
+    return max(0.0, float(row["solar_capacity"]))
 
 
 @lru_cache(maxsize=2)

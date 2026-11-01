@@ -343,9 +343,11 @@ export default function Dashboard() {
     if (siteLoading) return
 
     if (!activeSite) {
-      setLoading(false)
-      setHourlyData([])
-      setApiError('Select or create a site before loading predictions.')
+      queueMicrotask(() => {
+        setLoading(false)
+        setHourlyData([])
+        setApiError('Select or create a site before loading predictions.')
+      })
       return
     }
 

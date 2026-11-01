@@ -1,17 +1,15 @@
 from pathlib import Path
-import sqlite3
-from contextlib import closing
 
 import joblib
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from app.auth import get_current_user
+from database import engine
 
 router = APIRouter(prefix="/api/energy", tags=["Energy Demand"])
-DB_PATH = Path(__file__).resolve().parent.parent / "wattora.db"
-
 MODEL_PATH = (
     Path(__file__).resolve().parent.parent
     / "models"
@@ -40,32 +38,26 @@ def predict_energy(
     user=Depends(get_current_user),
 ):
     try:
-        try:
-            with closing(sqlite3.connect(DB_PATH)) as connection:
-                site = connection.execute(
-                    """
+        with engine.connect() as connection:
+            site = connection.execute(
+                text("""
                     SELECT daily_usage FROM sites
-                    WHERE id = ? AND owner_id = ?
-                    """,
-                    (request.site_id, user["id"]),
-                ).fetchone()
-                if site is None:
-                    raise HTTPException(status_code=404, detail="Site not found.")
+                    WHERE id = :site_id AND owner_id = :owner_id
+                """),
+                {"site_id": request.site_id, "owner_id": user["id"]},
+            ).mappings().first()
+            if site is None:
+                raise HTTPException(status_code=404, detail="Site not found.")
 
-                device_energy = connection.execute(
-                    """
+            device_energy = connection.execute(
+                text("""
                     SELECT COALESCE(SUM(power * hours), 0)
-                    FROM devices WHERE site_id = ? AND enabled = 1
-                    """,
-                    (request.site_id,),
-                ).fetchone()[0]
-        except sqlite3.Error as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Could not load this site's energy profile: {exc}",
-            ) from exc
+                    FROM devices WHERE site_id = :site_id AND enabled = TRUE
+                """),
+                {"site_id": request.site_id},
+            ).scalar_one()
 
-        daily_usage_kwh = max(float(site[0]), float(device_energy))
+        daily_usage_kwh = max(float(site["daily_usage"]), float(device_energy))
         typical_hourly_demand_kw = daily_usage_kwh / 24
         if 6 <= request.hour <= 9:
             hourly_factor = 1.15

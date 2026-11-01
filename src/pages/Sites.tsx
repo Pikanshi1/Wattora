@@ -134,7 +134,9 @@ export default function Sites() {
   }
 
   useEffect(() => {
-    void loadSites()
+    queueMicrotask(() => {
+      void loadSites()
+    })
   }, [])
 
   const filteredSites = useMemo(() => {

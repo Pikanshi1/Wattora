@@ -1,7 +1,3 @@
-import sqlite3
-from contextlib import closing
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -10,7 +6,6 @@ from app.auth import get_current_user
 from database import engine
 
 router = APIRouter(prefix="/api/optimizer", tags=["Energy Optimization"])
-DB_PATH = Path(__file__).resolve().parent.parent / "wattora.db"
 
 
 class OptimizationRequest(BaseModel):
@@ -23,28 +18,25 @@ def analyze_energy(
     request: OptimizationRequest,
     user=Depends(get_current_user),
 ):
-    try:
-        with closing(sqlite3.connect(DB_PATH)) as connection:
-            site = connection.execute(
-                "SELECT id FROM sites WHERE id = ? AND owner_id = ?",
-                (request.site_id, user["id"]),
-            ).fetchone()
-            if site is None:
-                raise HTTPException(status_code=404, detail="Site not found.")
+    with engine.connect() as connection:
+        site = connection.execute(
+            text("""
+                SELECT id FROM sites
+                WHERE id = :site_id AND owner_id = :owner_id
+            """),
+            {"site_id": request.site_id, "owner_id": user["id"]},
+        ).first()
+        if site is None:
+            raise HTTPException(status_code=404, detail="Site not found.")
 
-            demand_kw = connection.execute(
-                """
-                SELECT COALESCE(SUM(power), 0)
-                FROM devices
-                WHERE site_id = ? AND enabled = 1
-                """,
-                (request.site_id,),
-            ).fetchone()[0]
-    except sqlite3.Error as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not load this site's enabled devices: {exc}",
-        ) from exc
+        demand_kw = connection.execute(
+            text("""
+            SELECT COALESCE(SUM(power), 0)
+            FROM devices
+            WHERE site_id = :site_id AND enabled = TRUE
+            """),
+            {"site_id": request.site_id},
+        ).scalar_one()
 
     with engine.connect() as connection:
         preferences = connection.execute(
